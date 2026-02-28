@@ -1,0 +1,7 @@
+services:
+  isaac-webrtc:
+    command:
+      - --/app/livestream/publicEndpointAddress=${PUBLIC_IP}
+      - --/app/livestream/port=${ISAAC_STREAM_PORT:-49100}
+      - --exec
+      - '"/shared/auto_open_play.py" --scene "/Isaac/Samples/ROS2/Scenario/carter_warehouse_navigation.usd" --play-delay 2.0 --restart-play'

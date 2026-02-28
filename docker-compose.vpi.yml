@@ -1,0 +1,18 @@
+services:
+  ros2-isaac-vpi:
+    image: ${ROS2_VPI_IMAGE?Set ROS2_VPI_IMAGE to a VPI-enabled Isaac ROS image}
+    container_name: ros2-isaac-vpi
+    network_mode: host
+    stdin_open: true
+    tty: true
+    environment:
+      ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-0}"
+      RMW_IMPLEMENTATION: "rmw_fastrtps_cpp"
+      FASTRTPS_DEFAULT_PROFILES_FILE: "/shared/fastdds_no_shm.xml"
+      ROS_DISTRO: "${ROS_DISTRO:-jazzy}"
+      LD_LIBRARY_PATH: "/opt/nvidia/vpi3/lib64:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
+    volumes:
+      - ./ros2_ws:/workspaces/ros2_ws
+      - ./shared:/shared
+    working_dir: /workspaces/ros2_ws
+    command: ["sleep", "infinity"]

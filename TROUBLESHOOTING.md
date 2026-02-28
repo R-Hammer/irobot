@@ -50,7 +50,7 @@ Loads the Carter warehouse scene, uses `SimulationContext` with `initialize_phys
 
 ### 5. `README.md` — Updated teleop instructions
 
-Steps 5-7 updated to use an interactive shell (`docker compose exec ros2 bash`) instead of a single-line `bash -lc` command, so raw keyboard input works.
+Steps 5-7 updated to use an interactive shell (`docker compose exec ros2-perception bash`) instead of a single-line `bash -lc` command, so raw keyboard input works.
 
 ---
 
@@ -85,7 +85,7 @@ Steps 5-7 updated to use an interactive shell (`docker compose exec ros2 bash`) 
 
 ```bash
 cd ~/isaac_ros_stack
-docker compose --profile headless up -d ros2
+docker compose --profile headless up -d ros2-perception ros2-navigation
 docker compose --profile headless up -d isaac-headless
 ```
 
@@ -100,7 +100,7 @@ Wait until you see `[carter] READY — robot listens on /cmd_vel`.
 ### 3. Verify data flow
 
 ```bash
-docker compose exec ros2 bash -c 'source /opt/ros/jazzy/setup.bash && timeout 5 ros2 topic echo /clock --once'
+docker compose exec ros2-perception bash -c 'source /opt/ros/jazzy/setup.bash && timeout 5 ros2 topic echo /clock --once'
 ```
 
 If you see `sec:` / `nanosec:`, everything is working.
@@ -108,7 +108,7 @@ If you see `sec:` / `nanosec:`, everything is working.
 ### 4. Run teleop
 
 ```bash
-docker compose exec ros2 bash
+docker compose exec ros2-perception bash
 # inside the container:
 source /opt/ros/jazzy/setup.bash
 ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r cmd_vel:=/cmd_vel
@@ -119,7 +119,7 @@ Use `i/j/k/l` keys to drive.
 ### 5. Verify robot movement (separate terminal)
 
 ```bash
-docker compose exec ros2 bash -c 'source /opt/ros/jazzy/setup.bash && ros2 topic echo /chassis/odom --once'
+docker compose exec ros2-perception bash -c 'source /opt/ros/jazzy/setup.bash && ros2 topic echo /chassis/odom --once'
 ```
 
 ### 6. Stop everything
@@ -153,10 +153,10 @@ docker compose --profile headless down
 
 ```bash
 # List all ROS2 topics from Isaac Sim
-docker compose exec ros2 bash -lc 'source /opt/ros/jazzy/setup.bash && ros2 topic list'
+docker compose exec ros2-perception bash -lc 'source /opt/ros/jazzy/setup.bash && ros2 topic list'
 
 # Check if any data on a topic
-docker compose exec ros2 bash -lc 'source /opt/ros/jazzy/setup.bash && timeout 5 ros2 topic hz /clock'
+docker compose exec ros2-perception bash -lc 'source /opt/ros/jazzy/setup.bash && timeout 5 ros2 topic hz /clock'
 
 # View Isaac Sim logs
 docker logs isaac-sim-headless 2>&1 | grep -i "carter\|error\|fatal\|READY"
