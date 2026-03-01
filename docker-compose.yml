@@ -207,6 +207,38 @@ services:
     working_dir: /workspaces/ros2_ws
     command: ["sleep", "infinity"]
 
+  ros2-yolo:
+    build:
+      context: .
+      dockerfile: Dockerfile.ros2.yolo
+      args:
+        ROS_DISTRO: "jazzy"
+    container_name: ros2-yolo
+    profiles: ["yolo"]
+    runtime: nvidia
+    network_mode: host
+    stdin_open: true
+    tty: true
+    environment:
+      ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-0}"
+      RMW_IMPLEMENTATION: "rmw_fastrtps_cpp"
+      FASTRTPS_DEFAULT_PROFILES_FILE: "/shared/fastdds_no_shm.xml"
+      ROS_DISTRO: "jazzy"
+      PYTHONUNBUFFERED: "1"
+      YOLO_CONFIG_DIR: "/tmp/Ultralytics"
+    volumes:
+      - ./ros2_ws:/workspaces/ros2_ws
+      - ./shared:/shared
+    working_dir: /workspaces/ros2_ws
+    command: ["sleep", "infinity"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
   ros2-humble-isaac:
     build:
       context: .
