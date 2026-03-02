@@ -1,17 +1,12 @@
-# Docker Bring-Up Plan (Stepwise, Testable)
+# Main How-To: Isaac WebRTC + Foxglove + 2D SLAM + Nav2
 
-## Implement / Do Not Implement (first decision)
+This is the default path for this workspace.
 
-Implement now:
-- Keep current working Docker flow (`isaac-webrtc` + `ros2-isaac`) unchanged.
-- Bring up robot motion + 2D SLAM (`slam_toolbox`) with clear pass/fail checks per phase.
-- Keep Visual SLAM isolated in a separate optional VPI container (`ros2-isaac-vpi`).
-- Add repeatable validation commands via `scripts/slam_step_check.sh`.
-
-Do not implement now:
-- Do not block the whole stack on finding a VPI image first.
-- Do not mix Visual SLAM dependencies into the baseline `ros2-isaac` image.
-- Do not introduce a distro pivot unless a concrete VPI image requires it.
+- Isaac Sim visualization: `isaac-webrtc`
+- ROS container: `ros2-isaac`
+- Foxglove bridge: `foxglove-bridge`
+- Mapping: `slam_toolbox` (2D)
+- Navigation: `nav_slam.launch.py`
 
 Run from:
 
@@ -19,24 +14,16 @@ Run from:
 cd ~/isaac_ros_stack
 ```
 
-## Official guide path (no NGC account dependency)
+---
 
-This follows the docs you linked:
-- Isaac ROS getting started + Docker mode
-- NVIDIA Container Toolkit (apt)
-
-Key point:
-- For a no-account flow, use local image build with:
-  `isaac-ros activate --build-local`
-- Do not rely on pulling a prebuilt registry image.
-
-Preflight check:
+## 0) Preflight (once)
 
 ```bash
 ./scripts/check_isaac_ros_official_setup.sh
+./scripts/slam_step_check.sh phase0
 ```
 
-Install/configure Docker GPU runtime (official toolkit flow):
+If needed, configure Docker GPU runtime:
 
 ```bash
 sudo nvidia-ctk runtime configure --runtime=docker
@@ -44,100 +31,174 @@ sudo systemctl daemon-reload
 sudo systemctl restart docker
 ```
 
-Install Isaac ROS CLI and initialize Docker mode:
+---
 
-```bash
-pip install termcolor --break-system-packages
-sudo apt-get update
-sudo apt-get install -y isaac-ros-cli
-sudo isaac-ros init docker
-```
+## 1) Set host IP and start core services (default)
 
-Activate local image build (no prebuilt pull required):
-
-```bash
-export ISAAC_ROS_WS=~/isaac_ros_stack/ros2_ws
-isaac-ros activate --build-local
-```
-
-## Phase 0: Compose sanity
-
-```bash
-./scripts/slam_step_check.sh phase0
-```
-
-Exit criteria:
-- `docker compose config` is valid.
-
-## Phase 1: Start base services
-
-Set reachable host IP:
+Set your reachable host IP:
 
 ```bash
 ip -4 -o addr show | awk '$2 !~ /^(lo|docker0|br-)/ {print $2, $4}'
 export PUBLIC_IP=<YOUR_REACHABLE_HOST_IP>
+export PUBLIC_IP=141.83.113.173
 echo "$PUBLIC_IP"
 ```
 
-Start services:
+Start default stack:
 
 ```bash
-docker compose --profile webrtc up -d --build isaac-webrtc ros2-isaac
-./scripts/slam_step_check.sh phase1
+docker compose --profile webrtc up -d --build isaac-webrtc ros2-isaac foxglove-bridge
 ```
 
 Optional auto-open Carter warehouse + auto-Play:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.webrtc.scene.yml up -d --force-recreate --no-deps isaac-webrtc
-docker compose logs --no-color isaac-webrtc | grep -E "auto_open_play|app ready|Full Streaming App is loaded"
 ```
 
-Exit criteria:
-- WebRTC client connects to `${PUBLIC_IP}:49100`.
-- Isaac log shows `app ready` or `Full Streaming App is loaded`.
-
-## Phase 2: Baseline control + 2D SLAM
-
-Install teleop once:
+Check Isaac and ROS bridge gate:
 
 ```bash
-docker compose exec ros2-isaac bash -lc 'source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash && apt-get update && apt-get install -y ros-${ROS_DISTRO:-jazzy}-teleop-twist-keyboard'
+docker compose logs --no-color isaac-webrtc | grep -E "auto_open_play|app ready|Full Streaming App is loaded"
+./scripts/slam_step_check.sh phase1
 ```
 
-Check baseline topics:
+Check Foxglove readiness gate:
+
+```bash
+./scripts/check_foxglove_ready.sh
+```
+
+---
+
+## 2) Ensure `/scan` exists (required for SLAM/Nav2)
+
+If `/scan` is already present, skip this section.
+
+Quick check:
+
+```bash
+docker compose exec ros2-isaac bash -lc 'source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash && ros2 topic list | grep -E "^/scan$|^/front_3d_lidar/lidar_points$"'
+```
+
+If only point cloud exists, install converter once:
+
+```bash
+docker compose exec ros2-isaac bash -lc 'source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash && apt-get update && apt-get install -y ros-${ROS_DISTRO:-jazzy}-pointcloud-to-laserscan'
+```
+
+Start converter (keep this terminal open):
+
+```bash
+docker compose exec ros2-isaac bash -lc 'source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash && ros2 run pointcloud_to_laserscan pointcloud_to_laserscan_node --ros-args -r cloud_in:=/front_3d_lidar/lidar_points -r scan:=/scan -p target_frame:=base_link -p transform_tolerance:=0.1 -p min_height:=-1.0 -p max_height:=1.0 -p range_min:=0.1 -p range_max:=30.0'
+```
+
+Check LiDAR + baseline topics:
 
 ```bash
 ./scripts/slam_step_check.sh phase2
 ```
 
-Manual drive:
+---
+
+## 3) Start 2D mapping (`slam_toolbox`)
+
+In a new terminal:
+
+```bash
+docker compose exec ros2-isaac bash -lc 'source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash && source /workspaces/ros2_ws/install/setup.bash && ros2 launch robot_bringup mapping_2d.launch.py use_sim_time:=true scan_topic:=/scan odom_topic:=/chassis/odom'
+```
+
+Drive robot in another terminal (manual):
 
 ```bash
 docker compose exec ros2-isaac bash -lc 'source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash && source /workspaces/ros2_ws/install/setup.bash && ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r cmd_vel:=/cmd_vel'
 ```
 
-Simple circular motion (teleop-like `o` / right arc):
+Or automatic circle drive: teleip-like 'o'
 
 ```bash
 docker compose exec ros2-isaac bash -lc 'source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash && source /workspaces/ros2_ws/install/setup.bash && ros2 launch robot_navigation circle_drive.launch.py cmd_vel_topic:=/cmd_vel linear_speed:=0.2 angular_speed:=-0.5'
 ```
 
-For left arc (teleop-like `u`), use `angular_speed:=0.5`.
+---
 
-2D mapping:
+## 4) Foxglove client (default visualization)
 
-```bash
-docker compose exec ros2-isaac bash -lc 'source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash && source /workspaces/ros2_ws/install/setup.bash && ros2 launch robot_bringup mapping_2d.launch.py use_sim_time:=true scan_topic:=/scan'
+From your client machine, connect Foxglove Desktop to:
+
+```text
+ws://<HOST_IP>:8765
 ```
 
-Exit criteria:
-- `/scan`, `/cmd_vel`, `/odom`, `/map` are active.
-- Robot can be driven and map grows over time.
+Recommended panels/topics:
 
-## Phase 3: Optional Visual SLAM runtime gate (VPI)
+- 3D panel, Fixed frame: `map` (fallback `odom`)
+- LaserScan: `/scan`
+- Map: `/map`
+- PointCloud: `/front_3d_lidar/lidar_points`
+- Image: `/front_stereo_camera/left/image_raw`
 
-Set VPI-enabled image and start sidecar container:
+If panel says waiting for events:
+
+- Check that the panel topic exactly matches an existing ROS topic.
+- Do not use `/points` unless your system actually publishes `/points`.
+- Re-run readiness gate:
+
+```bash
+./scripts/check_foxglove_ready.sh
+```
+
+---
+
+## 5) Nav2 on top of SLAM map
+
+Start slam-first Nav2 in a new terminal:
+
+```bash
+docker compose exec ros2-isaac bash -lc 'source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash && source /workspaces/ros2_ws/install/setup.bash && ros2 launch robot_navigation nav_slam.launch.py map_file:=/workspaces/ros2_ws/src/robot_navigation/maps/phase1_map.yaml'
+```
+
+Run the Nav2 baseline validation gate (TF + map updates + lifecycle + one goal):
+
+```bash
+./scripts/slam_step_check.sh phase2b
+```
+
+Optional goal overrides for the phase2b goal gate:
+
+```bash
+NAV_GOAL_X=0.5 NAV_GOAL_Y=0.0 NAV_GOAL_YAW=0.0 NAV_GOAL_TIMEOUT_SEC=90 ./scripts/slam_step_check.sh phase2b
+```
+
+---
+
+## 6) Save map
+
+```bash
+bash scripts/save_map.sh my_map
+```
+
+Outputs:
+
+- `my_map.pgm`
+- `my_map.yaml`
+
+---
+
+## 7) Stop default stack
+
+```bash
+docker compose down
+```
+
+---
+
+## Optional: Visual SLAM (VPI sidecar, separate from default flow)
+
+Use this only after the default flow above is working.
+
+### VPI runtime gate
 
 ```bash
 export ROS2_VPI_IMAGE=<YOUR_VPI_ENABLED_ISAAC_ROS_IMAGE>
@@ -146,91 +207,31 @@ export ROS2_VPI_IMAGE=<YOUR_VPI_ENABLED_ISAAC_ROS_IMAGE>
 ./scripts/slam_step_check.sh phase3
 ```
 
-Exit criteria:
-- `libnvvpi.so.3` exists in `ros2-isaac-vpi`.
+Exit criteria: `libnvvpi.so.3` exists in `ros2-isaac-vpi`.
 
-## Phase 4: Visual SLAM launch
+## Foxglove: Add PointCloud layer (quick steps)
 
-```bash
-./scripts/vslam_vpi.sh launch
-# new terminal:
-./scripts/vslam_vpi.sh odom_once
-./scripts/slam_step_check.sh phase4
-```
+Open a 3D panel
 
-Exit criteria:
-- `/visual_slam/tracking/odometry` publishes.
+- Click the + (Add Panel) → choose **3D**. If a panel is already open, click the panel title to reveal the panel menu.
 
-## Sensor add-on path (easy-first)
+Add a PointCloud layer (click-by-click)
 
-- Start with Isaac Sim sensors already in Carter scene (no hardware friction).
-- Then add one real sensor only:
-  - Realsense first, or
-  - ZED first.
-- After sensor works standalone (`image`, `camera_info`, `tf`), wire it into Phase 4.
+- Open the left panel (panel settings) of the 3D panel if it’s collapsed.
+- Expand **Topics** or **Layers**.
+- Click the **Add** (plus) button under Layers → choose **PointCloud**.
 
-## Stop commands
+Layer settings
 
-```bash
-./scripts/vslam_vpi.sh down || true
-docker compose down
-```
+- **Topic:** the exact topic name (e.g. `/front_3d_lidar/lidar_points` or `/point_cloud`).
+- **Color / Mode:** `intensity` (or `rgb` if your messages contain RGB fields).
+- **Point size:** increase to `2–4` if points look tiny.
+- **Decimation:** increase to reduce bandwidth if too many points are shown.
+- **Fixed Frame (3D panel header):** choose `map` if you have TF from `base_scan` → `map`; otherwise set the Fixed Frame to the point cloud's `header.frame_id` (e.g. `base_scan`).
 
-## Optional: YOLO sidecar container (`ros2-yolo`)
+Foxglove tips
 
-Build and start the YOLO container:
+- If the cloud is invisible, switch the 3D panel Fixed Frame to the cloud's `header.frame_id` (e.g. `base_scan`) to confirm the raw points appear.
+- If the topic is not present in Foxglove, ensure the Isaac scene is playing and the RTX Lidar Helper is attached and configured to publish `point_cloud`.
+- Reduce `Publish Full Scan` or increase decimation if bandwidth causes missing updates.
 
-```bash
-docker compose --profile yolo build ros2-yolo
-docker compose --profile yolo up -d ros2-yolo
-docker compose --profile yolo ps ros2-yolo
-```
-
-Quick checks:
-
-```bash
-docker compose exec ros2-yolo bash -lc 'source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash && ros2 topic hz /front_stereo_camera/left/image_raw'
-docker compose exec ros2-yolo bash -lc 'python3 -c "import torch; print(torch.cuda.is_available())"'
-docker compose exec ros2-yolo bash -lc 'python3 -c "from ultralytics import YOLO; print(\"ultralytics_ok\")"'
-```
-
-Build bringup package (contains YOLO ROS2 node):
-
-```bash
-docker compose exec ros2-yolo bash -lc 'source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash && cd /workspaces/ros2_ws && colcon build --symlink-install --packages-select robot_bringup'
-```
-
-Launch live detection from robot camera:
-fix numpy version
-```bash
-docker compose exec ros2-yolo bash -lc 'python3 -c "import numpy; print(numpy.__version__)"'
-```
-
-```bash
-docker compose exec ros2-yolo bash -lc 'source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash && source /workspaces/ros2_ws/install/setup.bash && ros2 launch robot_bringup yolo_detector.launch.py image_topic:=/front_stereo_camera/left/image_raw device:=cuda:0 conf_threshold:=0.25 max_fps:=10.0'
-```
-
-Output topics:
-
-```bash
-docker compose exec ros2-yolo bash -lc 'source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash && ros2 topic list | grep -E "^/yolo/annotated_image$|^/yolo/detections$"'
-docker compose exec ros2-yolo bash -lc 'source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash && ros2 topic echo /yolo/detections --once'
-```
-
-Image saving behavior:
-- Default: `save_images:=false` so `0` images are saved to disk.
-- Enable saving:
-
-```bash
-docker compose exec ros2-yolo bash -lc 'source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash && source /workspaces/ros2_ws/install/setup.bash && ros2 launch robot_bringup yolo_detector.launch.py save_images:=true save_dir:=/shared/yolo_frames save_every_n:=10 max_saved_images:=500'
-```
-
-Notes:
-- `save_every_n:=10` saves every 10th processed frame.
-- `max_saved_images:=500` caps saved files at 500. Use `0` for no cap.
-
-Stop only YOLO sidecar:
-
-```bash
-docker compose --profile yolo stop ros2-yolo
-```

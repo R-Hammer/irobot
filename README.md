@@ -5,7 +5,7 @@ This workspace runs:
 - `isaac-webrtc` (headless Isaac Sim full streaming / WebRTC client path)
 - `isaac` (legacy headless service, compatibility)
 - `isaac-gui` (optional local GUI on host display)
-- `ros2` (ROS2 Jazzy dev container)
+- `ros2-isaac` (ROS2 Jazzy Isaac workflow container)
 
 ---
 
@@ -31,7 +31,7 @@ This workspace runs:
 cd ~/isaac_ros_stack
 
 # 1. Start both containers
-docker compose --profile headless up -d ros2
+docker compose --profile headless up -d ros2-isaac
 docker compose --profile headless up -d isaac-headless
 
 # 2. Wait for READY (first run downloads assets ~2-5 min, subsequent runs ~20s)
@@ -39,10 +39,10 @@ docker logs -f isaac-sim-headless 2>&1 | grep "\[carter\]"
 # Wait for: [carter] READY — robot listens on /cmd_vel. Ctrl+C to quit.
 
 # 3. Verify data flows
-docker compose exec ros2 bash -c 'source /opt/ros/jazzy/setup.bash && timeout 5 ros2 topic echo /clock --once'
+docker compose exec ros2-isaac bash -c 'source /opt/ros/jazzy/setup.bash && timeout 5 ros2 topic echo /clock --once'
 
 # 4. Drive the robot
-docker compose exec ros2 bash
+docker compose exec ros2-isaac bash
 # inside the container:
 source /opt/ros/jazzy/setup.bash
 ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r cmd_vel:=/cmd_vel
@@ -106,6 +106,10 @@ docker compose exec ros2-isaac bash -lc 'cd /workspaces/ros2_ws && ./scripts/bui
 # 5) Validate Isaac topic flow before SLAM
 docker compose exec ros2-isaac bash -lc 'source /opt/ros/$ROS_DISTRO/setup.bash && ros2 topic list'
 docker compose exec ros2-isaac bash -lc 'source /opt/ros/$ROS_DISTRO/setup.bash && ros2 topic echo /tf --once'
+
+# 5b) Validate baseline contract before Nav2
+docker compose exec ros2-isaac bash -lc 'source /opt/ros/$ROS_DISTRO/setup.bash && ros2 topic list | grep -E "^/scan$|^/odom$|^/tf$|^/map$|^/cmd_vel$"'
+# Expected TF chain for baseline: map <-> odom <-> base_link
 ```
 
 If Jazzy fails for Isaac ROS package compatibility, switch and rebuild:
@@ -207,6 +211,17 @@ docker compose exec ros2-isaac bash -lc '
   source /opt/ros/$ROS_DISTRO/setup.bash && \
   ros2 run nav2_map_server map_saver_cli -f /workspaces/ros2_ws/src/robot_navigation/maps/warehouse_map
 '
+
+# 8) Start Nav2 with slam-first launch separation (no VSLAM/Nvblox assumptions)
+docker compose exec ros2-isaac bash -lc '
+  source /opt/ros/$ROS_DISTRO/setup.bash && \
+  source /workspaces/ros2_ws/install/setup.bash && \
+  ros2 launch robot_navigation nav_slam.launch.py \
+    map_file:=/workspaces/ros2_ws/src/robot_navigation/maps/phase1_map.yaml
+'
+
+# 9) Run baseline Nav2 gate (TF connectivity, map updates, lifecycle active, one-goal execution)
+./scripts/slam_step_check.sh phase2b
 ```
 
 Expected outputs:
@@ -235,7 +250,7 @@ export PUBLIC_IP=<YOUR_SERVER_IP>
 export PUBLIC_IP=141.83.113.173
 
 # 2. Start Isaac + ROS2
-docker compose --profile webrtc up -d isaac-webrtc ros2
+docker compose --profile webrtc up -d isaac-webrtc ros2-isaac
 
 # 3. Wait for Isaac to be ready
 docker compose logs --no-color isaac-webrtc | grep -E "app ready|Full Streaming App is loaded"
@@ -259,7 +274,7 @@ cd ~/isaac_ros_stack
 xhost +si:localuser:root
 
 # 2. Start GUI + ROS2
-docker compose --profile gui up -d isaac-gui ros2
+docker compose --profile gui up -d isaac-gui ros2-isaac
 
 # 3. Isaac Sim desktop UI opens on your local display
 
@@ -291,13 +306,20 @@ This creates required bind-mount folders under `./docker/isaac-sim`.
 ## 3) Build/start base stack
 
 ```bash
-docker compose up -d ros2
+docker compose up -d ros2-isaac
 ```
 
 You can open a ROS2 shell with:
 
 ```bash
-docker compose exec ros2 bash
+docker compose exec ros2-isaac bash
+```
+
+Baseline validation gates:
+
+```bash
+./scripts/slam_step_check.sh phase1
+./scripts/slam_step_check.sh phase2
 ```
 
 ---

@@ -37,6 +37,7 @@ RUN k="/usr/share/keyrings/nvidia-isaac-ros.gpg" && \
 RUN apt-get update && apt-get install -y \
     ros-jazzy-magic-enum \
     ros-jazzy-foxglove-msgs \
+    ros-jazzy-foxglove-bridge \
  && rm -rf /var/lib/apt/lists/*
 
 RUN if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then rosdep init; fi && \

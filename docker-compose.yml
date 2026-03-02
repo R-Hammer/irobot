@@ -207,6 +207,32 @@ services:
     working_dir: /workspaces/ros2_ws
     command: ["sleep", "infinity"]
 
+  foxglove-bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile.ros2.isaac
+      args:
+        ROS_DISTRO: "jazzy"
+    container_name: foxglove-bridge
+    depends_on:
+      - ros2-isaac
+    network_mode: host
+    stdin_open: true
+    tty: true
+    environment:
+      ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-0}"
+      RMW_IMPLEMENTATION: "rmw_fastrtps_cpp"
+      FASTRTPS_DEFAULT_PROFILES_FILE: "/shared/fastdds_no_shm.xml"
+      ROS_DISTRO: "jazzy"
+    volumes:
+      - ./ros2_ws:/workspaces/ros2_ws
+      - ./shared:/shared
+    working_dir: /workspaces/ros2_ws
+    command:
+      - bash
+      - -lc
+      - source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash && ros2 launch foxglove_bridge foxglove_bridge_launch.xml
+
   ros2-yolo:
     build:
       context: .
